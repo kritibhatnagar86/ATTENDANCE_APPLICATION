@@ -197,7 +197,7 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta, date
 from flask_cors import CORS
-from sqlalchemy import and_
+
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from math import radians, sin, cos, sqrt, atan2
@@ -225,7 +225,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # Initialize database
 db = SQLAlchemy(app)
 
-# -------------------- Database Models --------------------
+#-------------------- Database Models --------------------
 
 # Student Model
 class Student(db.Model):
@@ -266,6 +266,10 @@ class AdminLocation(db.Model):
 
 
 # -------------------- Helper Functions --------------------
+
+
+
+
 
 # Haversine formula to calculate distance in km
 def haversine(lat1, lon1, lat2, lon2):
