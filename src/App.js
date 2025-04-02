@@ -293,7 +293,6 @@
 
 
 
-
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import FingerprintJS from "@fingerprintjs/fingerprintjs";
@@ -304,11 +303,12 @@ const App = () => {
   const [adminPassword, setAdminPassword] = useState("");
   const [studentId, setStudentId] = useState("");
   const [name, setName] = useState("");
-  const [location, setLocation] = useState(null);
+  
   const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState("");
-  const [totalStudents, setTotalStudents] = useState(0);
+  const [present_student, setpresentStudents] = useState(0);
+  const [proxies_student, setproxiesStudents] = useState(0);
 
   useEffect(() => {
     const getFingerprint = async () => {
@@ -324,8 +324,11 @@ const App = () => {
   const fetchAttendance = async () => {
     try {
       const response = await axios.get("http://localhost:5000/attendance");
+      // console.log(response);
       setAttendance(response.data.students);
-      setTotalStudents(response.data.total_present);
+      setpresentStudents(response.data.total_present);
+      setproxiesStudents(response.data.total_proxy);
+      
     } catch (error) {
       console.error("Error fetching attendance:", error);
     }
@@ -382,6 +385,13 @@ const App = () => {
 
         try {
           setLoading(true);
+          const studentData = {
+            student_id: studentId,
+            name,
+            latitude,
+            longitude,
+            device_id: deviceId,
+          };
 
           const response = await axios.post("http://localhost:5000/student_checkin", {
             student_id: studentId,
@@ -395,10 +405,12 @@ const App = () => {
             alert(response.data.warning);
           } else {
             alert("Check-in successful!");
+            await handleMarkAttendance(studentData);
           }
 
           setLoading(false);
-          fetchAttendance();
+         
+          
         } catch (error) {
           setLoading(false);
           console.error("Error checking in:", error);
@@ -411,6 +423,32 @@ const App = () => {
       }
     );
   };
+    const handleMarkAttendance = async (checkinresponse) => {
+    try {
+      setLoading(true);
+      const studentData = checkinresponse;  // ✅ Get the actual data
+
+      console.log("Marking Attendance with Data:", studentData);
+  
+      const response = await axios.post("http://localhost:5000/mark_attendance", studentData);
+      // const response=await axios.post("http://localhost:5000/mark_attendance",checkinresponse);
+
+    
+      if (response.data.warning) {
+        alert(response.data.warning);
+      } else {
+        alert("Attendance marked successfully!");
+        setLoading(false);
+        fetchAttendance();
+      }
+    }
+     catch (error) {
+      setLoading(false);
+      console.error("Error marking attendance:", error);
+      alert("Error marking attendance. Please try again.");
+    }
+  };
+  
 
   return (
     <div className="p-6 max-w-lg mx-auto bg-white rounded-xl shadow-md space-y-4">
@@ -466,22 +504,41 @@ const App = () => {
           <button className="bg-green-500 text-white px-4 py-2 rounded" onClick={submitAdminLocation}>
             Submit Current Location
           </button>
+        
 
           <h3 className="text-lg font-bold mt-4">Today's Attendance</h3>
-          <p className="text-gray-700 font-semibold">Total Students: {totalStudents}</p>
+        
 
           {attendance.length > 0 ? (
-            <ul className="border p-2 rounded">
-              {attendance.map((record, index) => (
-                <li key={index} className="border-b p-2">
-                  <strong>{record.name}</strong> - {record.student_id} <br />
-                  <span className="text-gray-500 text-sm">{record.date}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-gray-500">No attendance records yet.</p>
-          )}
+  <div className="border p-2 rounded">
+    {/* ✅ Regular Attendance */}
+    <h3 className="text-green-600 font-bold mb-2">Present Students</h3>
+    <p className="text-gray-700 font-semibold">Total Present: {present_student}</p>
+    <ul>
+      {attendance.filter(record => record.status !== 'Proxy').map((record, index) => (
+        <li key={index} className="border-b p-2 text-green-500">
+          <strong>{record.name}</strong> - {record.student_id} <br />
+          <span className="text-gray-500 text-sm">{record.date} </span>
+        </li>
+      ))}
+    </ul>
+
+    {/* ❌ Proxy Attendance */}
+    <h3 className="text-red-600 font-bold mt-4">Proxy Attempts</h3>
+    <p className="text-gray-700 font-semibold">Total Proxies: {proxies_student}</p>
+    <ul>
+      {attendance.filter(record => record.status === 'Proxy').map((record, index) => (
+        <li key={index} className="border-b p-2 text-red-500">
+          <strong>{record.name}</strong> - {record.student_id} <br />
+          <span className="text-gray-500 text-sm">{record.date}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+) : (
+  <p className="text-gray-500">No attendance records yet.</p>
+)}
+
         </>
       )}
     </div>

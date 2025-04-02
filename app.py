@@ -190,14 +190,11 @@
 # # Run Flask App
 # if __name__ == "__main__":
 #     app.run(debug=True, port=5000)
-
-
-
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta, date
 from flask_cors import CORS
-
+from sqlalchemy import and_
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from math import radians, sin, cos, sqrt, atan2
@@ -225,7 +222,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # Initialize database
 db = SQLAlchemy(app)
 
-#-------------------- Database Models --------------------
+# -------------------- Database Models --------------------
 
 # Student Model
 class Student(db.Model):
@@ -267,10 +264,6 @@ class AdminLocation(db.Model):
 
 # -------------------- Helper Functions --------------------
 
-
-
-
-
 # Haversine formula to calculate distance in km
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371  # Earth radius in km
@@ -296,8 +289,15 @@ def home():
 def admin_login():
     try:
         data = request.json
+        print(data)
         admin = Admin.query.filter_by(admin_id=data["admin_id"]).first()
+        # print(admin.password)
+       
 
+        hashed_password = generate_password_hash(data["password"])
+        print("Hashed:", hashed_password)
+
+        print(check_password_hash(admin.password, data["password"]))
         if admin and check_password_hash(admin.password, data["password"]):
             return jsonify({"message": "Admin login successful!"}), 200
         else:
@@ -339,7 +339,7 @@ def save_admin_location():
         new_location = AdminLocation(
             latitude=float(data["latitude"]),
             longitude=float(data["longitude"]),
-            timestamp=datetime.now(UTC)  # ✅ Fix datetime issue
+            timestamp=datetime.now() # ✅ Fix datetime issue
         )
 
         db.session.add(new_location)
@@ -359,107 +359,178 @@ def save_admin_location():
 
 @app.route("/student_checkin", methods=["POST"])
 def student_checkin():
+    
     try:
         data = request.json
-        print(f"📌 Received Student Data: {data}")
+        print("Received Data:", data)  # Debugging incoming data
 
-        # Get latest admin location
+        required_fields = ["student_id", "name", "latitude", "longitude", "device_id"]
+        if not all(key in data for key in required_fields):
+            print("Error: Missing required fields")
+            return jsonify({"error": "Missing required fields"}), 400
+        
         latest_admin_location = AdminLocation.query.order_by(AdminLocation.timestamp.desc()).first()
         if not latest_admin_location:
             print("❌ No admin location found")
             return jsonify({"error": "No admin location found"}), 400
 
         print(f"📍 Latest Admin Location: {latest_admin_location.latitude}, {latest_admin_location.longitude}, {latest_admin_location.timestamp}")
-
-        # Convert latest admin timestamp to UTC-aware
-        if latest_admin_location.timestamp.tzinfo is None:
-            admin_timestamp = latest_admin_location.timestamp.replace(tzinfo=timezone.utc)  # ✅ Fix here
-        else:
-            admin_timestamp = latest_admin_location.timestamp
-
-        now_utc = datetime.now(timezone.utc)  # ✅ Fix timezone issue
-        time_difference = (now_utc - admin_timestamp).total_seconds()
-
-        print(f"🕒 Current Time: {now_utc}")
-        print(f"⏳ Time Difference: {time_difference} seconds")
-
-        if time_difference > 300:  # 5 minutes
-            print("❌ Admin location is too old")
-            return jsonify({"warning": "Admin location is older than 5 minutes"}), 400
-
-        # Check student's distance from admin's last location
-        student_lat, student_long = float(data["latitude"]), float(data["longitude"])
-        distance = haversine(student_lat, student_long, latest_admin_location.latitude, latest_admin_location.longitude)
-
-        print(f"📏 Student Distance from Admin: {distance} km")
-
-        if distance > 0.5:  # 500m radius
-            print("❌ Student is too far from admin")
-            return jsonify({"warning": "You are not within the valid check-in area"}), 400
-
+        now_time=datetime.now()
+        time_difference = (now_time - latest_admin_location.timestamp).total_seconds()
+        print(time_difference)
+        if time_difference > 300:
+            print("time difference is more")
+            return jsonify({"warning": "Time difference is not in the desired range"}), 200
+        
         # Check if student has already checked in today
+        print("Checking if student has already checked in...")
         student_check = Student.query.filter(and_(
             Student.student_id == data["student_id"],
-            Student.date == datetime.now(UTC).date()
+            Student.date == date.today()
         )).first()
-
-        print(f"📌 Student Check-in Status: {student_check}")
-
+        
         if student_check:
-            print("⚠️ Student has already checked in today")
+            print("Student already checked in.")
             return jsonify({"warning": "This student ID has already checked in today."}), 200
 
         # Check if device has already been used for check-in today
+        print("Checking if device has already been used for check-in...")
         device_check = Student.query.filter(and_(
             Student.device_id == data["device_id"],
-            Student.date == datetime.now(UTC).date()
+            Student.date == date.today()
         )).first()
-
-        print(f"📌 Device Check-in Status: {device_check}")
-
+        
         if device_check:
-            print("⚠️ This device has already been used for check-in today")
+            print("Device already checked in.")
             return jsonify({"warning": "This device has already been used for check-in today."}), 200
 
-        # Insert new student record
+        # Insert new check-in record
+        print("Inserting new student check-in record...")
         new_student = Student(
             student_id=data["student_id"],
             name=data["name"],
-            latitude=student_lat,
-            longitude=student_long,
+            latitude=float(data["latitude"]),
+            longitude=float(data["longitude"]),
             device_id=data["device_id"],
-            date=datetime.now(UTC).date()
+            timestamp=now_time,
+            date=date.today()
         )
 
         db.session.add(new_student)
         db.session.commit()
 
-        print("✅ Student check-in successful!")
+        print("Student check-in successful!")
         return jsonify({"message": "Student check-in successful!"}), 201
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error in student_checkin: {e}")  # Print actual error in console
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/mark_attendance",methods=["POST"])
+def mark_attendance():
+    try:
+        
+        data = request.json
+        print("Received data:", data)  # Debugging line
+
+        if not data:
+            return jsonify({'error': 'No data received'}), 400
+        student_id = data.get('student_id')
+        name = data.get('name')
+        student_lat = data.get('latitude')
+        student_long = data.get('longitude')
+        device_id = data.get('device_id')
+        latest_admin_location = AdminLocation.query.order_by(AdminLocation.timestamp.desc()).first()
+        if not latest_admin_location:
+            print("❌ No admin location found")
+            return jsonify({"error": "No admin location found"}), 400
+
+        print(f"📍 Latest Admin Location: {latest_admin_location.latitude}, {latest_admin_location.longitude}, {latest_admin_location.timestamp}")
+        now_time=datetime.now()
+        time_difference = (now_time - latest_admin_location.timestamp).total_seconds()
+
+        if time_difference > 300:
+            return jsonify({"warning": "Admin location is older than 5 minutes"}), 400
+
+        print(f"⏳ Time Difference: {time_difference} seconds")
+
+       
+       
+        distance = haversine(student_lat, student_long, latest_admin_location.latitude, latest_admin_location.longitude)
+
+   
+            
+        print(f"Student: {student_id}, Distance: {distance} km")  # Debugging
+        if distance > 0.5:  # 500m radius
+            print("❌ Student is too far from admin")
+            return jsonify({"warning": "You are not in teacher's range"}), 200
+        else :
+            existing_attendance = Attendance.query.filter(
+                Attendance.student_id == student_id,
+                Attendance.date == date.today()
+            ).first()
+
+            if not existing_attendance:
+                new_attendance = Attendance(student_id=student_id, name=name)
+                db.session.add(new_attendance)
+                
+                print(f"Marked Present: {student_id}")
+                db.session.commit()
+                return jsonify({
+                    "message": "Attendance marked successfully",
+                    }), 201
+            else:
+                return jsonify({"warning": "No new students within the attendance zone or already marked."}), 200
 
     except Exception as e:
-        print(f"❌ Error in student check-in: {e}")
+        db.session.rollback()
+        print(f"Error in mark_attendance: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# Get Attendance Records
+
+
+
 @app.route("/attendance", methods=["GET"])
 def get_attendance():
-    records = Attendance.query.filter(Attendance.date == date.today()).all()
-    total_students = len(records)
+    today = date.today()
+    
+    # Fetch all students
+    all_students = Student.query.filter_by(date=today).all()
+    # print("all_students" ,all_students)
+    
+    # Fetch today's attendance records
+    attendance_records = Attendance.query.filter_by(date=today).all()
+    # print("attendee",attendance_records)
+    present_students = {rec.student_id for rec in attendance_records}
+    # print(present_students)
+    # Prepare response
+    response = []
+    for student in all_students:
+        if student.student_id in present_students:
+            status = "Present"
+        else:
+            status = "Proxy"
+        
+        response.append({
+            "student_id": student.student_id,
+            "name": student.name,
+            "date": today.strftime("%Y-%m-%d"),
+            "status": status
+        })
+    print(response)
 
     return jsonify({
-        "total_present": total_students,
-        "students": [
-            {"student_id": rec.student_id, "name": rec.name, "date": rec.date.strftime("%Y-%m-%d")}
-            for rec in records
-        ]
+        "total_present": len(present_students),
+        "total_proxy": len(all_students) - len(present_students),
+        "students": response
     })
 
 
 
-with app.app_context():
-    result = db.session.execute(text("SELECT * FROM admin_location")).fetchall()
-    print("📌 Admin Locations:", result)
+
+# with app.app_context():
+#     result = db.session.execute(text("SELECT * FROM admin_location")).fetchall()
+#     print("📌 Admin Locations:", result)
 # Initialize Database
 with app.app_context():
     db.create_all()
@@ -467,4 +538,5 @@ with app.app_context():
 # Run Flask App
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
+
 
